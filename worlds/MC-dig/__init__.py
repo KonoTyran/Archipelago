@@ -17,7 +17,7 @@ class MinecraftWorld(World):
     """
     Minecraft Dig - dig a hole.
     """
-    game: str = "Minecraft dig"
+    game: str = "Minecraft Dig"
     topology_present = False
 
     item_name_to_id = Constants.item_name_to_id
