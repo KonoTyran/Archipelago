@@ -1,0 +1,68 @@
+<TextColors>:
+    # Hex-format RGB colors used in clients. Resets after an update/install.
+    # To avoid, you can copy the TextColors section into a new "user.kv" next to this file
+    # and it will read from there instead.
+    black: "000000"
+    red: "EE0000"
+    green: "00FF7F"  # typically a location
+    yellow: "FAFAD2"  # typically other slots/players
+    blue: "6495ED"  # typically extra info (such as entrance)
+    magenta: "EE00EE"  # typically your slot/player
+    cyan: "00EEEE"  # typically regular item
+    slateblue: "6D8BE8"  # typically useful item
+    plum: "AF99EF"  # typically progression item
+    salmon: "FA8072"  # typically trap item
+    white: "FFFFFF"  # not used, if you want to change the generic text color change color in Label
+<Label>:
+    color: "FFFFFF"
+<OptionsLayout>:
+    StackLayout:
+        height: dp(30)
+        size_hint_y: None
+        padding: dp(10)
+        spacing: dp(5)
+        Label:
+            padding: (0, dp(5))
+            size_hint: (None, None)
+            text: "Install: "
+            size: self.texture_size
+        Button:
+            id: full_install_button
+            padding: (dp(10),dp(5))
+            size_hint: (None, None)
+            text: "Full Reinstall"
+            size: self.texture_size
+        Button:
+            id: java_install_button
+            padding: (dp(10),dp(5))
+            size_hint: (None, None)
+            text: "Java"
+            size: self.texture_size
+        Button:
+            id: forge_install_button
+            padding: (dp(10),dp(5))
+            size_hint: (None, None)
+            text: "Forge"
+            size: self.texture_size
+    StackLayout:
+        height: dp(30)
+        size_hint_y: None
+        padding: dp(10)
+        Label:
+            id: reinstall_status
+            text: ""
+            size: self.texture_size
+<ConfirmPopup>:
+    cols:1
+	Label:
+		text: root.text
+	GridLayout:
+		cols: 2
+		size_hint_y: None
+		height: '44sp'
+		Button:
+			text: 'Yes'
+			on_release: root.dispatch('on_answer',True)
+		Button:
+			text: 'No'
+			on_release: root.dispatch('on_answer', False)

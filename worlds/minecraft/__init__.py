@@ -7,6 +7,7 @@ from typing import Dict, Any
 
 from BaseClasses import Region, Entrance, Item, Tutorial, ItemClassification, Location
 from worlds.AutoWorld import World, WebWorld
+from worlds.LauncherComponents import Component, components, Type, launch_subprocess, SuffixIdentifier
 
 from . import Constants
 from .Options import minecraft_options
@@ -15,6 +16,16 @@ from .ItemPool import build_item_pool, get_junk_item_names
 from .Rules import set_rules
 
 client_version = 9
+
+
+def launch_client():
+    from .Client import launch
+    launch_subprocess(launch, name="MinecraftClient")
+
+
+# Append Minecraft Client to launcher components
+components.append(Component('Minecraft Client', 'MinecraftClient', icon='mcicon', func=launch_client,
+                            file_identifier=SuffixIdentifier('.apmc'), component_type=Type.CLIENT))
 
 
 class MinecraftSettings(settings.Group):
@@ -102,7 +113,8 @@ class MinecraftWorld(World):
             'player_name': self.multiworld.get_player_name(self.player),
             'player_id': self.player,
             'client_version': client_version,
-            'structures': {exit: self.multiworld.get_entrance(exit, self.player).connected_region.name for exit in exits},
+            'structures': {exit: self.multiworld.get_entrance(exit, self.player).connected_region.name for exit in
+                           exits},
             'advancement_goal': self.multiworld.advancement_goal[self.player].value,
             'egg_shards_required': min(self.multiworld.egg_shards_required[self.player].value,
                                        self.multiworld.egg_shards_available[self.player].value),
@@ -155,7 +167,7 @@ class MinecraftWorld(World):
             region = self.multiworld.get_region(region_name, self.player)
             for loc_name in locations:
                 loc = MinecraftLocation(self.player, loc_name,
-                    self.location_name_to_id.get(loc_name, None), region)
+                                        self.location_name_to_id.get(loc_name, None), region)
                 region.locations.append(loc)
 
         # Add events
@@ -191,6 +203,7 @@ class MinecraftWorld(World):
 
 class MinecraftLocation(Location):
     game = "Minecraft"
+
 
 class MinecraftItem(Item):
     game = "Minecraft"
