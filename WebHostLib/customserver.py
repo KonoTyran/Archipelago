@@ -81,7 +81,7 @@ class WebHostContext(Context):
                 if commands:
                     for command in commands:
                         self.main_loop.call_soon_threadsafe(cmdprocessor, command.commandtext)
-                        command.delete()
+                        command.do_delete()
                     commit()
             time.sleep(5)
 

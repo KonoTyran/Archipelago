@@ -2,7 +2,7 @@ import ModuleUpdate
 
 ModuleUpdate.update()
 
-from worlds.minecraft.Client import launch
+from worlds.minecraft.client.MinecraftClient import launch
 import Utils
 
 if __name__ == "__main__":

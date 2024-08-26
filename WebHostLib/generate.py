@@ -207,6 +207,6 @@ def upload_to_db(folder, sid, owner, race):
                     seed = res
                     gen = Generation.get(id=seed.id)
                     if gen is not None:
-                        gen.delete()
+                        gen.do_delete()
                     return seed.id
     raise Exception("Generation zipfile not found.")

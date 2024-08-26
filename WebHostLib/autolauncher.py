@@ -94,12 +94,12 @@ def autogen(config: dict):
                             for generation in to_start:
                                 sid = Seed.get(id=generation.id)
                                 if sid:
-                                    generation.delete()
+                                    generation.do_delete()
                                 else:
                                     launch_generator(generator_pool, generation)
 
                             commit()
-                        select(generation for generation in Generation if generation.state == STATE_ERROR).delete()
+                        select(generation for generation in Generation if generation.state == STATE_ERROR).do_delete()
 
                     while 1:
                         time.sleep(0.1)

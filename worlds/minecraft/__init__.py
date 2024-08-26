@@ -1,5 +1,8 @@
 import os
 import json
+from xmlrpc.client import Server
+
+import Utils
 import settings
 import typing
 from base64 import b64encode, b64decode
@@ -19,7 +22,7 @@ client_version = 9
 
 
 def launch_client():
-    from .Client import launch
+    from .client.MinecraftClient import launch
     launch_subprocess(launch, name="MinecraftClient")
 
 
@@ -31,6 +34,8 @@ components.append(Component('Minecraft Client', 'MinecraftClient', icon='mcicon'
 class MinecraftSettings(settings.Group):
     class ForgeDirectory(settings.OptionalUserFolderPath):
         pass
+    class ServerDirectory(settings.OptionalUserFolderPath):
+        pass
 
     class ReleaseChannel(str):
         """
@@ -39,6 +44,7 @@ class MinecraftSettings(settings.Group):
         """
 
     forge_directory: ForgeDirectory = ForgeDirectory("Minecraft Forge server")
+    server_directory: ServerDirectory = ServerDirectory(Utils.user_path('minecraft_server'))
     max_heap_size: str = "2G"
     release_channel: ReleaseChannel = ReleaseChannel("release")
 

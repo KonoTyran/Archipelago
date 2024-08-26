@@ -221,10 +221,6 @@ class MinecraftContext:
         self.send_command(f"connect \"{address}\"")
 
 
-def launch():
-    asyncio.run(main())
-
-
 def stream_minecraft_output(pipe, queue, process):
     pipe.reconfigure(errors="replace")
 
