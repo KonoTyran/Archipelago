@@ -120,7 +120,7 @@ def autogen(config: dict):
                                     launch_generator(generator_pool, generation)
 
                             commit()
-                        select(generation for generation in Generation if generation.state == STATE_ERROR).do_delete()
+                        select(generation for generation in Generation if generation.state == STATE_ERROR).delete()
 
                     while not stop_event.wait(0.1):
                         with db_session:
