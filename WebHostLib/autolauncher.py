@@ -115,7 +115,7 @@ def autogen(config: dict):
                             for generation in to_start:
                                 sid = Seed.get(id=generation.id)
                                 if sid:
-                                    generation.do_delete()
+                                    generation.delete()
                                 else:
                                     launch_generator(generator_pool, generation)
 
