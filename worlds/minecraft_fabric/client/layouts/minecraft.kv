@@ -48,7 +48,7 @@
     spacing: 10
     Label:
         size_hint: None, 1
-        width: 100
+        width: dp(150)
         text: root.label + ":"
         text_size: self.size
         valign: "middle"
@@ -57,6 +57,27 @@
         text: root.value
         multiline: False
         on_text_validate: root.button_press()
+
+<DropdownOption>
+    rows: 1
+    size_hint: 1, None
+    height: 30
+    spacing: 10
+    Label:
+        size_hint: None, 1
+        width: dp(150)
+        text: root.label + ":"
+        text_size: self.size
+        valign: "middle"
+        halign: "right"
+    Spinner:
+        text: root.value
+        values: root.options
+        size_hint: None, None
+        height: 30
+        width: dp(200)
+        on_text:
+            root.value = self.text
 
 <Separator@Widget>
     size_hint_y: None
@@ -277,6 +298,7 @@
                         width: self.texture_size[0] + dp(20)
                         text: self.parent.button_label
                         on_press: self.parent.button_press()
+
                 TextOption:
                     id: max_memory
                     label: "Max Memory"
@@ -286,3 +308,9 @@
                     id: min_memory
                     label: "Min Memory"
                     value: ""
+
+                DropdownOption:
+                    id: release_option
+                    value: ""
+                    options: []
+                    label: "Release Channel"

@@ -25,12 +25,15 @@ from kivy.core.image import Image as CoreImage
 from kivy.core.window import Window
 from kivy.lang import Builder
 from kivy.network.urlrequest import UrlRequest, UrlRequestUrllib
-from kivy.properties import StringProperty, ObjectProperty, NumericProperty
+from kivy.properties import StringProperty, ObjectProperty, NumericProperty, ListProperty
 from kivy.uix.boxlayout import BoxLayout
+from kivy.uix.button import Button
+from kivy.uix.dropdown import DropDown
 from kivy.uix.gridlayout import GridLayout
 from kivy.uix.label import Label
 from kivy.uix.popup import Popup
 from kivy.uix.recycleview import RecycleView
+from kivy.uix.spinner import Spinner
 from kivy.uix.stacklayout import StackLayout
 from kivy.uix.textinput import TextInput
 from kivy.uix.widget import Widget
@@ -40,9 +43,9 @@ from kivy.utils import escape_markup
 import Utils
 
 version_file_endpoint = "https://raw.githubusercontent.com/KonoTyran/archipelago-randomizer-fabric/main/versions/fabric_versions.json"
-fabric_server_url = "https://meta.fabricmc.net/v2/versions/loader/[minecraft]/[fabric]/1.0.1/server/jar"
+fabric_server_url = "https://meta.fabricmc.net/v2/versions/loader/[minecraft]/[fabric]/[installer]/server/jar"
 
-options = Utils.get_settings()["mcfabric_options"]
+options = Utils.get_settings()["minecraft_fabric_options"]
 
 os.environ["KIVY_NO_CONSOLELOG"] = "1"
 os.environ["KIVY_NO_FILELOG"] = "1"
@@ -73,34 +76,6 @@ def format_bytes(size):
     power = 0 if size <= 0 else floor(log(size, 1024))
     return f"{round(size / 1024 ** power, 2)} {['B', 'KB', 'MB', 'GB', 'TB'][int(power)]}"
 
-
-class APMC(TypedDict):
-    world_seed: str
-    seed_name: str
-    player_name: str
-    player_id: int
-    client_version: int
-    structures: dict[str, str]
-    advancement_goal: int
-    egg_shards_required: int
-    egg_shards_available: int
-    required_bosses: str
-    MC35: bool
-    death_link: bool
-    starting_items: list
-    race: bool
-    server: Optional[str]
-    port: Optional[int]
-
-
-class Version(TypedDict):
-    version: int
-    java: int
-    fabric: str
-    minecraft: str
-    url: str
-
-
 class ServerStatus(Enum):
     STOPPED = 0
     STARTING = 1
@@ -116,22 +91,147 @@ class ServerStatus(Enum):
         return self.value == other.value
 
 
+def get_recent_items() -> List:
+    if not os.path.isdir(options.server_directory):
+        os.makedirs(options.server_directory)
+    saves = []
+    for directory in os.listdir(options.server_directory):
+        if directory.startswith("Archipelago-"):
+            save = os.path.join(options.server_directory, directory, "save.apmc")
+            description = "None"
+            with open(save, "r") as jsonfile:
+                save = json.load(jsonfile)
+                description = save["description"]
+            saves.append((description, directory))
+    return saves
+
+
+class Downloader:
+    def __init__(self, url, folder, download_popup, on_success=None, on_error=None, on_finish=None, file_name=None, extract=False):
+        self.url = url
+        self.folder = folder
+        self.on_success = on_success
+        self.on_error = on_error
+        self.download_popup = download_popup
+        self.file_name = file_name
+        self.on_finish = on_finish
+        self.extract = extract
+        self._download()
+
+    def _download(self):
+        UrlRequest(self.url,
+                   on_progress=self._download_progress,
+                   on_finish= self._download_finish,
+                   on_success=self._download_success,
+                   on_error=self._download_error,
+                   on_redirect=self._download_redirect,
+                   chunk_size=1024000)
+
+    def _download_progress(self, request, current_size, total_size):
+        if total_size > 0:
+            self.download_popup.progress_text = f"Downloading... {format_bytes(current_size)} / {format_bytes(total_size)}"
+            self.download_popup.progress = current_size / total_size * 100
+        else:
+            self.download_popup.progress_text = f"Downloading... {format_bytes(current_size)}"
+            self.download_popup.progress = 100
+
+    def _download_redirect(self, request: UrlRequestUrllib, result: str):
+        old_url = urlparse(request.url)
+        loc = request.resp_headers['Location']
+        if loc.startswith("/"):
+            url = f"{old_url.scheme}://{old_url.netloc}{loc}"
+        else:
+            url = loc
+        self.url = url
+        self._download()
+
+    def _download_error(self, request, error):
+        self.on_error(error)
+
+    def _download_success(self, request: UrlRequestUrllib, result):
+        if self.extract:
+            self._extract(result)
+            return
+        os.makedirs(self.folder, exist_ok=True)
+        headers = request.resp_headers
+        file_name = os.path.basename(request.url)
+        if 'Content-Disposition' in headers and not self.file_name:
+            file_name = headers.get('Content-Disposition').split("filename=")[1].strip('"')
+        if self.file_name:
+            file_name = self.file_name
+
+        file = os.path.join(self.folder, file_name)
+        try:
+            with open(file, 'wb') as f:
+                f.write(result)
+        except Exception as e:
+            self.on_error(e)
+            return
+
+        self.download_popup.dismiss()
+        self.on_success()
+
+    def _download_finish(self, request: UrlRequestUrllib):
+        if not self.extract:
+            pass
+            self.on_finish()
+
+    def _extract(self, data):
+        self.download_popup.progress_text = "Extracting..."
+        self.download_popup.progress = 0
+
+        def extract():
+            # extract the file
+            import zipfile
+            from io import BytesIO
+
+            with zipfile.ZipFile(BytesIO(data)) as archive:
+                # filter out all the directories
+                file_list = [name for name in archive.namelist() if not archive.getinfo(name).is_dir()]
+                self.download_popup.max = len(file_list)
+
+                for index, full_name in enumerate(file_list):
+                    file_path = list(filter(bool, full_name.split("/")))
+
+                    target_path = os.path.join(self.folder, *file_path)
+                    target_dir = os.path.dirname(target_path)
+                    os.makedirs(target_dir, exist_ok=True)
+
+                    self.download_popup.progress = index
+                    with archive.open(full_name) as source:
+                        with open(target_path, 'wb') as dest:
+                            shutil.copyfileobj(source, dest)
+            self.download_popup.dismiss()
+            # self.on_finish()
+            self.on_success()
+
+        threading.Thread(target=extract).start()
+
+
 class MinecraftClient(App):
     stop = threading.Event()
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
+        self.index = 0
         self.welcome_window: Optional[WelcomeWindow] = None
         self.window_manager: Optional[WindowManager] = None
         self.server_window: Optional[ServerWindow] = None
-        self.minecraft_versions: dict[str, list[Version]] = {}
-        self.apmc: Optional[APMC] = None
-        self.version: Optional[Version] = None
+        self.minecraft_versions: dict[str, list] = {}
+        self.apmc = None
+        self.version = {}
         self.server = None
         self.java_url = None
-        self.download: Optional[UrlRequestUrllib] = None
+        self.download: Optional[Downloader] = None
         self.status: ServerStatus = ServerStatus.STOPPED
         self.apmc_path = None
+        self.mod_info = {}
+        self.release_chanel = None
+        try:
+            with open(os.path.join(options.server_directory, "ap-version.json"), "r") as f:
+                self.mod_info = json.load(f)
+        except Exception:
+            pass
 
     def build(self):
         Builder.load_string(load_text("layouts", "minecraft.kv"))
@@ -140,7 +240,6 @@ class MinecraftClient(App):
         self.server_window = ServerWindow(self)
         self.window_manager.add_widget(self.welcome_window)
         self.window_manager.add_widget(self.server_window)
-        Clock.schedule_once(self.init, 1)
 
         Window.bind(on_request_close=self.on_request_close)
 
@@ -150,30 +249,44 @@ class MinecraftClient(App):
         return self.window_manager
 
     def on_request_close(self, *arg):
-        self.send_command("stop")
-        Clock.schedule_interval(self.close, 1 / 60)
-        return True
+        if self.status == ServerStatus.RUNNING:
+            self.send_command("stop")
+            Clock.schedule_interval(self.close, 1 / 60)
+            return True
+        sys.exit()
 
     def close(self, dt):
         if self.stop.is_set():
             sys.exit()
-            pass
 
     def get_application_icon(self):
         return load_image("assets", "icon.png")
 
     def get_java_url(self) -> Optional[str]:
         if Utils.is_windows:
-            return f"https://corretto.aws/downloads/latest/amazon-corretto-{self.version["java"]}-x64-windows-jdk.zip"
+            return f"https://corretto.aws/downloads/latest/amazon-corretto-{self.version['java']}-x64-windows-jdk.zip"
         elif Utils.is_linux:
             if platform.machine() == "aarch64":
-                return f"https://corretto.aws/downloads/latest/amazon-corretto-{self.version["java"]}-aarch64-linux-jdk.tar.gz"
+                return f"https://corretto.aws/downloads/latest/amazon-corretto-{self.version['java']}-aarch64-linux-jdk.tar.gz"
             else:
-                return f"https://corretto.aws/downloads/latest/amazon-corretto-{self.version["java"]}-x64-linux-jdk.tar.gz"
+                return f"https://corretto.aws/downloads/latest/amazon-corretto-{self.version['java']}-x64-linux-jdk.tar.gz"
         return None
 
+    def remove_old_jdk(self):
+        for directory in os.listdir(options.server_directory):
+            if directory.startswith(f"jdk{self.version['java']}"):
+                shutil.rmtree(os.path.join(options.server_directory, directory))
+
     def get_jdk(self) -> Optional[str]:
-        jdk_exe = os.path.join(options.server_directory, f"jdk{self.version["java"]}", "bin")
+        jdk_exe = None
+        for directory in os.listdir(options.server_directory):
+            if directory.startswith(f"jdk{self.version['java']}"):
+                jdk_exe = os.path.join(options.server_directory, directory, "bin")
+                break
+
+        if jdk_exe is None:
+            return None
+
         if Utils.is_windows:
             jdk_exe = os.path.join(jdk_exe, "java.exe")
         else:
@@ -184,8 +297,24 @@ class MinecraftClient(App):
 
         return None
 
+    def check_eula(self) -> bool:
+        eula_path = os.path.join(options.server_directory, "eula.txt")
+        with open(eula_path, 'a+') as eula_file:
+            eula_file.seek(0)
+            eula_text = eula_file.read()
+            if 'eula=' not in eula_text:
+                eula_file.truncate()
+                eula_file.seek(0)
+                eula_file.write("#By changing the setting below to TRUE you are indicating your agreement to our EULA (https://aka.ms/MinecraftEULA).\n")
+                eula_file.write(f"#{time.strftime('%a %b %d %X %Z %Y')}\n")
+                eula_file.write("eula=false\n")
+            elif 'eula=true' in eula_text:
+                return True
+
+        return False
+
     def get_server_jar_name(self):
-        return f"fabric-server-mc.{self.version["minecraft"]}.{self.version["fabric"]}.jar"
+        return f"fabric-server-mc.{self.version['minecraft']}-{self.version['fabric']}-{self.version['fabric_installer']}.jar"
 
     def get_server_jar(self) -> Optional[str]:
         server_jar = os.path.join(options.server_directory, self.get_server_jar_name())
@@ -198,7 +327,7 @@ class MinecraftClient(App):
     def init(self, dt=None):
         layout: Widget = self.welcome_window.ids.saves
         layout.clear_widgets()
-        saves = self.get_recent_items()
+        saves = get_recent_items()
         if len(saves) == 0:
             layout.add_widget(Label(text="No saves"))
         else:
@@ -209,11 +338,14 @@ class MinecraftClient(App):
         ids.path.value = options.server_directory
         ids.max_memory.value = options.max_heap_size
         ids.min_memory.value = options.min_heap_size
+        ids.release_option.value = options.release_channel
+        ids.release_option.options = self.minecraft_versions.keys()
 
     def process_versions(self, response: UrlRequestUrllib, result):
-        self.minecraft_versions: dict[str, Version] = json.loads(result)
-        with open(os.path.join(options.server_directory, "minecraft_versions.json"), 'w') as f:
-            json.dump(self.minecraft_versions, f)
+        self.minecraft_versions: dict[str, dict] = json.loads(result)
+        os.makedirs(options.server_directory, exist_ok=True)
+        with open(os.path.join(options.server_directory, "minecraft_versions.json"), 'w') as file:
+            json.dump(self.minecraft_versions, file)
         self.auto_start_server()
 
     def process_local_versions(self, response: UrlRequestUrllib, result: str):
@@ -228,15 +360,8 @@ class MinecraftClient(App):
                         content=f"Unable to find Versions file. Must be connected to the internet on initial startup to fetch version and mod info.")
             self.log_error("No versions file found. Must be connected to the internet on initial startup to fetch version and mod info.")
 
-    def get_recent_items(self) -> List:
-        directory = os.path.abspath(options.server_directory)
-        saves = []
-        for directory in os.listdir(directory):
-            if directory.startswith("Archipelago-"):
-                saves.append(("test", directory))
-        return saves
-
     def auto_start_server(self):
+        Clock.schedule_once(self.init, 1)
         self.apmc_path = os.path.abspath(args.apmc_file) if args.apmc_file else None
         if self.apmc_path:
             self.open_apmc(path=self.apmc_path)
@@ -246,7 +371,6 @@ class MinecraftClient(App):
         if self.apmc_path is None:
             self.apmc_path = filedialog.askopenfilename(title="Choose AP Minecraft file",
                                               filetypes=(("Archipelago Minecraft", "*.apmc"),))
-        apmc: APMC
         if self.apmc_path is None or self.apmc_path == "" or os.path.isfile(self.apmc_path) is False:
             return
         with open(self.apmc_path, "r") as f:
@@ -259,147 +383,157 @@ class MinecraftClient(App):
                 apmc = json.loads(data)
 
         if apmc is not None:
-            self.start_server(apmc)
+            try:
+                self.apmc = apmc
 
-    def start_server(self, apmc: APMC) -> None:
-        self.apmc = apmc
+                self.version = next(filter(lambda entry: entry['version'] == self.apmc["client_version"],
+                                                    self.minecraft_versions[options.release_channel]))
+                self.server_window.status.text = f"Initializing {self.version['minecraft']}"
 
-        try:
-            self.version: Version = next(filter(lambda entry: entry['version'] == self.apmc["client_version"],
-                                                self.minecraft_versions[options.release_channel]))
-            self.server_window.status.text = f"Initializing {self.version["minecraft"]}"
+                self.window_manager.current = "Server"
+                self.start_server()
+            except KeyError:
+                self.log_error(f"unable to find version {self.apmc['client_version']} on {options.release_channel}")
+                info_dialog(title="Error",
+                            content=f"Unable to find version {self.apmc['client_version']} on the {options.release_channel} channel.")
+                self.apmc_path = None
 
-            self.window_manager.current = "Server"
-            self.start_server_check_jdk()
 
-        except KeyError:
-            self.log_error(f"unable to find version {self.apmc['client_version']} in {options.release_channel}")
-            info_dialog(title="Error", content=f"Unable to find version {self.apmc['client_version']} in the {options.release_channel} channel.")
-            self.apmc_path = None
-            return
+    def set_description(self, text):
+        self.apmc["description"] = text
+        self.start_server()
 
+    def eula_yes(self):
+        eula_path = os.path.join(options.server_directory, "eula.txt")
+        with open(eula_path, 'r+') as f:
+            text = f.read()
+            if 'false' in text:
+                f.seek(0)
+                f.write(text.replace('false', 'true'))
+                f.truncate()
+        self.start_server()
+
+    def eula_no(self):
+        self.window_manager.current = "Welcome"
+
+    def download_file(self, url, folder, on_success=None, on_error=None, file_name=None, extract=False, message="Downloading Files"):
+        self.server_window.show_progress_bar_dialog("Downloading", message, 100)
+
+        self.download = Downloader(url=url,
+                                   folder=folder,
+                                   download_popup=self.server_window.progress_popup,
+                                   on_success=on_success, on_error=on_error,
+                                   on_finish=self.download_finished,
+                                   file_name=file_name,
+                                   extract=extract)
+
+    def download_finished(self):
+        self.server_window.close_progress_bar_dialog()
 
 
     @mainthread
-    def start_server_check_jdk(self):
-        # check jdk
+    def start_server(self) -> None:
+        if self.check_mods() is False:
+            mods = self.version["mods"]
+            self.index = 0
+
+            def dont_update():
+                self.index = 0
+                self.version.update(self.mod_info)
+                self.start_server()
+
+            def finish_mod_download():
+                with open(os.path.join(options.server_directory, "ap-version.json"), "w") as f:
+                    self.mod_info = self.version
+                    json.dump(self.mod_info, f)
+
+                self.start_server()
+
+            def next_mod():
+                self.download = None
+                if self.index >= len(mods):
+                    finish_mod_download()
+                    return
+                self.download_file(url=mods[self.index],
+                                   folder=os.path.join(options.server_directory, "mods"),
+                                   on_success=next_mod,
+                                   message=f"Downloading Mod {self.index + 1}/{len(mods)}"
+                                   )
+                self.index += 1
+
+            def update_mod_list():
+                shutil.rmtree(os.path.join(options.server_directory, "mods"), ignore_errors=True)
+                os.makedirs(os.path.join(options.server_directory, "mods"), exist_ok=True)
+                next_mod()
+
+            confirm_prompt(title="Mod List Update",
+                           content="The mod list has changed.\n"
+                                   "Do you want to update the mod list?\n"
+                                   "WARNING: This will wipe the mods directory.",
+                           confirm=lambda _: update_mod_list(),
+                           cancel=lambda _: dont_update())
+            return
+
         if self.get_jdk() is None:
-            self.download_jdk(self.get_java_url())
-        else:
-            self.start_server_check_server_jar()
+            self.remove_old_jdk()
+            self.download_file(self.get_java_url(),
+                               folder=options.server_directory,
+                               on_success=self.start_server,
+                               on_error=self.jdk_error,
+                               extract=True,
+                               message="Downloading Java"
+                               )
+            return
 
-    @mainthread
-    def start_server_check_server_jar(self):
         if self.get_server_jar() is None:
-            self.download_server_jar(fabric_server_url.replace("[minecraft]", self.version["minecraft"]).replace("[fabric]", self.version["fabric"]))
-        else:
-            threading.Thread(target=self.server_thread).start()
-
-    def download_server_jar(self, url):
-        self.download = UrlRequest(url, on_progress=self.server_jar_download_progress, on_finish=self.server_jar_finished,
-                                   on_success=self.server_jar_run, on_error=self.server_jar_error, on_redirect=self.server_jar_redirect,
-                                   chunk_size=102400)
-        self.server_window.close_progress_bar_dialog()
-        self.server_window.show_progress_bar_dialog("Downloading Server Jar", f"Downloading Fabric {self.version["fabric"]} for Minecraft {self.version["minecraft"]}", 100)
-        self.log_info(f"downloading server jar from {url}")
-
-    def server_jar_download_progress(self, request, current_size, total_size):
-        if self.server_window.progress_popup is None:
+            self.download_file(url=fabric_server_url.replace("[minecraft]", self.version["minecraft"]).replace("[fabric]", self.version["fabric"]).replace("[installer]", self.version["fabric_installer"]),
+                               folder=options.server_directory,
+                               file_name=self.get_server_jar_name(),
+                               on_success=self.start_server,
+                               on_error=self.server_jar_error,
+                               message="Downloading Fabric"
+                               )
             return
-        if total_size > 0:
-            self.server_window.progress_popup.progress = current_size / total_size * 100
-            self.server_window.progress_popup.progress_text = f"Downloading... {format_bytes(current_size)} / {format_bytes(total_size)}"
 
-    def server_jar_redirect(self, request: UrlRequestUrllib, result: str):
-        old_url = urlparse(request.url)
-        loc = request.resp_headers['Location']
-        url = f"{old_url.scheme}://{old_url.netloc}{loc}"
-        self.download_server_jar(url)
+        if self.check_mods() is False:
+            mods = self.version["mods"]
+            self.index = 0
 
-    def server_jar_error(self, request, error):
+
+
+            return
+
+        if self.apmc.get("description") is None:
+            edit_prompt(title="Set Description", content="Set a description for this world", default="", confirm=lambda text: self.set_description(text))
+            return
+
+        if self.check_eula() is False:
+            confirm_prompt(title="EULA Agreement", content="By running this server you agree to the Minecraft EULA\nhttps://aka.ms/MinecraftEULA\nDo you agree to the Minecraft Eula?", confirm=lambda _: self.eula_yes(), cancel=lambda _: self.eula_no())
+            return
+
+        threading.Thread(target=self.server_thread).start()
+
+
+    def check_mods(self) -> bool:
+        return self.mod_info.get("mod_list_version") == self.version["mod_list_version"]
+
+    def mod_error(self, error):
+        info_dialog(title="Error", content=f"There was an error downloading Mod \n {error}")
+        self.window_manager.current = "Welcome"
+
+    def server_jar_error(self, error):
         info_dialog(title="Error", content=f"There was an error downloading Server Jar \n {error}")
-        self.log_error(f"download error: {error}")
+        self.window_manager.current = "Welcome"
 
-    def server_jar_run(self, request: UrlRequestUrllib, result):
-        self.server_window.close_progress_bar_dialog()
-        self.log_info(f"server jar downloaded to {options.server_directory}")
-
-        try:
-            with open(os.path.join(options.server_directory, self.get_server_jar_name()), 'wb') as f:
-                f.write(result)
-        except Exception as e:
-            self.log_error(f"error writing server jar: {e}")
-            info_dialog(title="Error", content=f"Error writing Fabric to {options.server_directory}")
-            return
-
-        self.start_server_check_server_jar()
-
-    def server_jar_finished(self, request: UrlRequestUrllib):
-        if request.resp_status == 200:
-            self.server_window.close_progress_bar_dialog()
-
-    def download_jdk(self, url):
-        self.download = UrlRequest(url, on_progress=self.jdk_download_progress, on_finish=self.jdk_finished,
-                                   on_success=self.jdk_extract, on_error=self.jdk_error, on_redirect=self.jdk_redirect,
-                                   chunk_size=102400)
-        self.server_window.close_progress_bar_dialog()
-        self.server_window.show_progress_bar_dialog("Downloading JDK", f"Downloading Java {self.version["java"]}", 100)
-        self.log_info(f"downloading jdk from {url}")
-
-    def jdk_download_progress(self, request, current_size, total_size):
-        if self.server_window.progress_popup is None:
-            return
-        if total_size > 0:
-            self.server_window.progress_popup.progress = current_size / total_size * 100
-            self.server_window.progress_popup.progress_text = f"Downloading... {format_bytes(current_size)} / {format_bytes(total_size)}"
-
-    def jdk_redirect(self, request: UrlRequestUrllib, result: str):
-        old_url = urlparse(request.url)
-        loc = request.resp_headers['Location']
-        url = f"{old_url.scheme}://{old_url.netloc}{loc}"
-        self.download_jdk(url)
-
-    def jdk_error(self, request, error):
+    def jdk_error(self, error):
         info_dialog(title="Error", content=f"There was an error downloading Java \n {error}")
-        self.log_error(f"download error: {error}")
-
-    def jdk_extract(self, request: UrlRequestUrllib, result):
-        self.server_window.close_progress_bar_dialog()
-        self.log_info(f"extracting jdk to {options.server_directory}")
-
-        def extract():
-            # extract the jdk
-            import zipfile
-            from io import BytesIO
-
-            jdk_dir = os.path.join(options.server_directory, f"jdk{self.version["java"]}")
-
-            with zipfile.ZipFile(BytesIO(result)) as archive:
-                # filter out all the directories
-                file_list = [name for name in archive.namelist() if not archive.getinfo(name).is_dir()]
-                self.open_progress_bar_dialog("Extracting JDK", f"Extracting Java {self.version["java"]}",
-                                              len(file_list))
-                for index, full_name in enumerate(file_list):
-                    file_path = list(filter(bool, full_name.split("/")))
-                    del file_path[0]
-
-                    target_path = os.path.join(jdk_dir, *file_path)
-                    target_dir = os.path.dirname(target_path)
-                    os.makedirs(target_dir, exist_ok=True)
-
-                    self.set_progress(index)
-                    with archive.open(full_name) as source:
-                        with open(target_path, 'wb') as dest:
-                            shutil.copyfileobj(source, dest)
-            self.finish_jdk_extract()
-
-        threading.Thread(target=extract).start()
+        self.window_manager.current = "Welcome"
 
     @mainthread
     def finish_jdk_extract(self):
         self.log_info(f"jdk extracted to {options.server_directory}")
         self.server_window.close_progress_bar_dialog()
-        self.start_server_check_server_jar()
+        self.start_server()
 
     @mainthread
     def open_progress_bar_dialog(self, title, content, max):
@@ -411,8 +545,7 @@ class MinecraftClient(App):
             self.server_window.progress_popup.progress = value
 
     def jdk_finished(self, request: UrlRequestUrllib):
-        if request.resp_status == 200:
-            self.server_window.close_progress_bar_dialog()
+        self.server_window.close_progress_bar_dialog()
         self.download = None
 
     def server_thread(self):
@@ -424,8 +557,10 @@ class MinecraftClient(App):
         if not os.path.isdir(world_dir):
             os.makedirs(world_dir)
         save_path = os.path.join(world_dir, "save.apmc")
-        if save_path != self.apmc_path:
-            shutil.copyfile(self.apmc_path, save_path)
+        if not os.path.isfile(save_path):
+            with open(save_path, "w") as file:
+                json.dump(self.apmc, file)
+
         os.environ["JAVA_OPTS"] = ""
         self.server = subprocess.Popen((self.get_jdk(),
                                         "-jar",
@@ -450,6 +585,8 @@ class MinecraftClient(App):
             if self.server.poll() is not None:
                 self.log_raw("[color=FFFF00]Minecraft server has exited.[/color]")
                 self.stop.set()
+                self.server_window.status.text = "Server Stopped"
+                self.server_window.background_color = (.5, .1, .1, 1)
 
             while not server_queue.empty():
                 raw_message: str = server_queue.get()
@@ -482,7 +619,7 @@ class MinecraftClient(App):
                     server_started_match = re.match(
                         "^\[[0-9:]+] \[Server thread/INFO]: Done \([0-9.]+s\)! For help, type \"help\"", raw_message)
                     if server_started_match:
-                        self.server_window.status.text = f"Server Running. Connect to `127.0.0.1` in Minecraft {self.version["minecraft"]}"
+                        self.server_window.status.text = f"Server Running. Connect to `127.0.0.1` in Minecraft {self.version['minecraft']}"
                         self.server_window.background_color = (.1, .5, .1, 1)
                         self.status = ServerStatus.RUNNING
 
@@ -493,8 +630,8 @@ class MinecraftClient(App):
         try:
             self.server.stdin.write(f'{cmd}\n')
             self.server.stdin.flush()
-        except AttributeError:
-            sys.exit()
+        except Exception:
+            pass
 
     @mainthread
     def log_info(self, msg):
@@ -530,6 +667,10 @@ class TextOption(GridLayout):
     label = StringProperty()
     button_label = StringProperty()
 
+class DropdownOption(GridLayout):
+    value = StringProperty()
+    label = StringProperty()
+    options = ListProperty()
 
 class FolderOption(TextOption):
 
@@ -552,7 +693,6 @@ class RecentItem(BoxLayout):
         self.ids.rename_icon.texture = icon_edit.texture
 
     def load(self):
-        print(f"Load path: {self.path}")
         save_path = os.path.join(options.server_directory, self.path, "save.apmc")
         if os.path.isfile(save_path):
             self.client.open_apmc(save_path)
@@ -564,7 +704,19 @@ class RecentItem(BoxLayout):
                                                   content=f"Delete {self.name}?\nThis Action is permanent.")
 
     def rename(self):
-        self.client.welcome_window.edit(title="Confirm Edit", content=f"Rename {self.name}", edit=self)
+        edit_prompt(title="Confirm Edit", content=f"Rename {self.name}", default=self.name, confirm=lambda text: self.set_name(text))
+
+    def set_name(self, name):
+        self.name = name
+        try:
+            with open(os.path.join(options.server_directory, self.path, "save.apmc"), "r+") as file:
+                data = json.load(file)
+                data["description"] = name
+                file.seek(0)
+                file.truncate()
+                json.dump(data, file)
+        except Exception as e:
+            info_dialog(title="Error", content=f"Error renaming world: {e}")
 
 
 class ConfirmDialog(Popup):
@@ -589,8 +741,8 @@ class ProgressBarDialog(Popup):
         self.max = max
 
 
-def confirm_prompt(confirm=None, title="Prompt", content="Are you sure?", cancel=None):
-    popup = ConfirmDialog(title=title, text=content, confirm_text="Yes", cancel_text="No")
+def confirm_prompt(confirm=None, title="Prompt", content="Are you sure?", cancel=None, confirm_text="Yes", cancel_text="No"):
+    popup = ConfirmDialog(title=title, text=content, confirm_text=confirm_text, cancel_text=cancel_text)
     popup.open()
 
     if cancel is not None:
@@ -605,25 +757,25 @@ def info_dialog(title="Prompt", content="Are you sure?", cancel=None):
     popup.open()
 
 
-def edit_prompt(confirm, title="Prompt", content="Are you sure?", cancel=None, edit: RecentItem = None):
+def edit_prompt(confirm, title="Prompt", content="Are you sure?", cancel=None, default=""):
     popup = ConfirmDialog(title=title, text=content, confirm_text="Confirm", cancel_text="Cancel")
     popup.open()
 
     content: Widget = popup.ids.content
 
-    textinput = TextInput(text=edit.name,
+    textinput = TextInput(text=default,
                           size_hint=(1, None),
                           height=30,
                           multiline=False,
                           )
     content.add_widget(textinput)
-    textinput.bind(on_text_validate=lambda _: confirm(edit, textinput.text))
+    textinput.bind(on_text_validate=lambda _: confirm(textinput.text))
     textinput.bind(on_text_validate=popup.dismiss)
 
     if cancel is not None:
         popup.ids.cancel.bind(on_press=cancel)
 
-    popup.ids.confirm.bind(on_press=lambda _: confirm(edit, textinput.text))
+    popup.ids.confirm.bind(on_press=lambda _: confirm(textinput.text))
 
 
 class WindowManager(ScreenManager):
@@ -694,23 +846,18 @@ class WelcomeWindow(Screen):
     def do_delete(self, target):
         world_path = os.path.join(options.server_directory, target)
         if options.server_directory in world_path and os.path.isdir(world_path):
-            print(f"Deleting {world_path}")
             shutil.rmtree(world_path)
             self.client.init()
 
     def confirm_delete(self, target, title="Confirm Delete", content="This Action is permanent."):
         confirm_prompt(title=title, content=content, confirm=lambda _: self.do_delete(target))
 
-    def edit(self, title, content, edit):
-        edit_prompt(title=title, content=content, edit=edit, confirm=self.do_rename)
-
-    def do_rename(self, target, rename):
-        target.name = rename
 
     def save_options(self):
         options.server_directory = self.ids.path.value
         options.max_heap_size = self.ids.max_memory.value
         options.min_heap_size = self.ids.min_memory.value
+        options.release_channel = self.ids.release_option.value
         Utils.get_settings().save()
         self.client.init()
 
